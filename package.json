@@ -1,12 +1,37 @@
 {
   "name": "medical-image-insight",
   "displayName": "Medical Image Insight",
-  "description": "Displays metadata for medical imaging files (.nii, .nrrd, .vtk, .vtp, .vti)",
+  "description": "Instant metadata viewer for medical imaging files: NIfTI, NRRD, VTK, VTP, VTI — no conversion needed.",
   "version": "0.1.0",
+  "publisher": "jilei-hao",
+  "author": {
+    "name": "Jilei Hao"
+  },
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jilei-hao/insight_vscode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jilei-hao/insight_vscode/issues"
+  },
+  "homepage": "https://github.com/jilei-hao/insight_vscode#readme",
+  "keywords": [
+    "medical imaging",
+    "nifti",
+    "nrrd",
+    "vtk",
+    "dicom",
+    "metadata",
+    "neuroimaging",
+    "itk",
+    "3d slicer"
+  ],
+  "categories": ["Other", "Visualization"],
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
