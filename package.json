@@ -1,0 +1,55 @@
+{
+  "name": "medical-image-insight",
+  "displayName": "Medical Image Insight",
+  "description": "Displays metadata for medical imaging files (.nii, .nrrd, .vtk, .vtp, .vti)",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "medicalImageInsight.metadataViewer",
+        "displayName": "Medical Image Metadata Viewer",
+        "selector": [
+          { "filenamePattern": "*.nii" },
+          { "filenamePattern": "*.nii.gz" },
+          { "filenamePattern": "*.nrrd" },
+          { "filenamePattern": "*.seq.nrrd" },
+          { "filenamePattern": "*.vtk" },
+          { "filenamePattern": "*.vtp" },
+          { "filenamePattern": "*.vti" }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "medicalImageInsight.showMetadata",
+        "title": "Show Medical Image Metadata"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "medicalImageInsight.showMetadata",
+          "when": "resourceExtname == .nii || resourceExtname == .nrrd || resourceExtname == .vtk || resourceExtname == .vtp || resourceExtname == .vti || resourceFilename =~ /\\.nii\\.gz$/ || resourceFilename =~ /\\.seq\\.nrrd$/",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
