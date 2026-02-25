@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as path from 'path';
-import { ImageMetadata, MetadataField } from './index';
+import { ImageMetadata, MetadataField, computeOrientationAxes } from './index';
 
 const DATATYPE_MAP: Record<number, string> = {
   0: 'UNKNOWN',
@@ -57,9 +57,33 @@ const FORM_CODE_MAP: Record<number, string> = {
   4: 'MNI_152',
 };
 
-function getOrientString(qformCode: number, sformCode: number): string {
-  const dominant = sformCode > 0 ? sformCode : qformCode;
-  return FORM_CODE_MAP[dominant] ?? `CODE_${dominant}`;
+function fmt3(v: number): string { return v.toFixed(4).padStart(9); }
+
+/** Format a 3×3 matrix as three "[ x  y  z ]" strings (one per voxel axis / column). */
+function formatDirectionMatrix(M: number[][]): string[] {
+  // Transpose: show column-as-axis (i, j, k axes as rows of output)
+  return [0, 1, 2].map(col =>
+    `[ ${fmt3(M[0][col])}  ${fmt3(M[1][col])}  ${fmt3(M[2][col])} ]`
+  );
+}
+
+/**
+ * Build 3×3 RAS matrix from NIfTI-1 quaternion (qform) parameters.
+ * Returns M[worldRow][voxelCol].
+ */
+function quaternionToMatrix(b: number, c: number, d: number, qfac: number): number[][] {
+  const a = Math.sqrt(Math.max(0, 1 - b * b - c * c - d * d));
+  // Standard quaternion → rotation matrix (NIfTI spec, section 4.4.2)
+  const R: number[][] = [
+    [a*a+b*b-c*c-d*d,  2*(b*c - a*d),    2*(b*d + a*c)],
+    [2*(b*c + a*d),    a*a+c*c-b*b-d*d,  2*(c*d - a*b)],
+    [2*(b*d - a*c),    2*(c*d + a*b),    a*a+d*d-b*b-c*c],
+  ];
+  // qfac flips the k-axis direction
+  if (qfac < 0) {
+    for (let row = 0; row < 3; row++) { R[row][2] *= -1; }
+  }
+  return R;
 }
 
 /**
@@ -187,12 +211,48 @@ export function parseNifti(fsPath: string): ImageMetadata {
     const qoffsetY = readF32(272);
     const qoffsetZ = readF32(276);
 
+    // Quaternion params for qform
+    const quaternB = readF32(256);
+    const quaternC = readF32(260);
+    const quaternD = readF32(264);
+    const qfac = readF32(76); // pixdim[0]
+
+    // sform matrix: srow_x at 280, srow_y at 296, srow_z at 312 (4 float32 each)
+    const srowX = [readF32(280), readF32(284), readF32(288), readF32(292)];
+    const srowY = [readF32(296), readF32(300), readF32(304), readF32(308)];
+    const srowZ = [readF32(312), readF32(316), readF32(320), readF32(324)];
+
     // descrip: char[80] at offset 148
     const descripBytes = buf.subarray(148, 228);
     const nullIdx = descripBytes.indexOf(0);
     const descrip = descripBytes.subarray(0, nullIdx >= 0 ? nullIdx : 80).toString('ascii').trim();
 
     const dtypeName = DATATYPE_MAP[datatype] ?? `TYPE_${datatype}`;
+
+    // Build direction matrix in RAS space: M[worldRow][voxelCol]
+    let dirMatrix: number[][] | null = null;
+    let orientAxes = '';
+
+    if (sformCode > 0) {
+      // Use sform (most reliable when available)
+      dirMatrix = [
+        [srowX[0], srowX[1], srowX[2]],
+        [srowY[0], srowY[1], srowY[2]],
+        [srowZ[0], srowZ[1], srowZ[2]],
+      ];
+    } else if (qformCode > 0) {
+      // Fall back to quaternion-derived rotation matrix
+      dirMatrix = quaternionToMatrix(quaternB, quaternC, quaternD, qfac);
+      // Scale each column by the corresponding voxel size
+      for (let col = 0; col < 3; col++) {
+        const scale = pixdims[col] ?? 1;
+        for (let row = 0; row < 3; row++) { dirMatrix[row][col] *= scale; }
+      }
+    }
+
+    if (dirMatrix) {
+      orientAxes = computeOrientationAxes(dirMatrix);
+    }
 
     fields.push(
       { label: 'Format', value: 'NIfTI-1', group: 'Header' },
@@ -205,16 +265,34 @@ export function parseNifti(fsPath: string): ImageMetadata {
       { label: 'Intent Code', value: `${INTENT_MAP[intentCode] ?? intentCode}`, group: 'Data' },
       { label: 'qform_code', value: `${FORM_CODE_MAP[qformCode] ?? qformCode} (${qformCode})`, group: 'Orientation' },
       { label: 'sform_code', value: `${FORM_CODE_MAP[sformCode] ?? sformCode} (${sformCode})`, group: 'Orientation' },
-      { label: 'Q-Offset (x,y,z)', value: `${qoffsetX.toFixed(3)}, ${qoffsetY.toFixed(3)}, ${qoffsetZ.toFixed(3)}`, group: 'Orientation' },
+      { label: 'Q-Offset (x,y,z mm)', value: `${qoffsetX.toFixed(3)}, ${qoffsetY.toFixed(3)}, ${qoffsetZ.toFixed(3)}`, group: 'Orientation' },
     );
+
+    if (orientAxes) {
+      fields.push({ label: 'Orientation Axes', value: orientAxes, group: 'Orientation' });
+    }
+
+    if (dirMatrix) {
+      const rows = formatDirectionMatrix(dirMatrix);
+      fields.push(
+        { label: 'i-axis direction (RAS)', value: rows[0], group: 'Orientation' },
+        { label: 'j-axis direction (RAS)', value: rows[1], group: 'Orientation' },
+        { label: 'k-axis direction (RAS)', value: rows[2], group: 'Orientation' },
+      );
+    }
+
+    if (dirMatrix && sformCode > 0) {
+      fields.push(
+        { label: 'sform Translation (mm)', value: `${srowX[3].toFixed(3)}, ${srowY[3].toFixed(3)}, ${srowZ[3].toFixed(3)}`, group: 'Orientation' },
+      );
+    }
 
     if (descrip) {
       fields.push({ label: 'Description', value: descrip, group: 'Header' });
     }
 
-    const orient = getOrientString(qformCode, sformCode);
     const spatialDims = dims.slice(0, 3);
-    const brief = `${spatialDims.join('×')}  ${dtypeName}  ${orient}`;
+    const brief = `${spatialDims.join('×')}  ${dtypeName}${orientAxes ? '  ' + orientAxes : ''}`;
 
     return { format, fields, brief };
   } else {
@@ -243,6 +321,23 @@ export function parseNifti(fsPath: string): ImageMetadata {
       pixdims.push(readF64(104 + i * 8));
     }
 
+    // NIfTI-2 sform: srow_x at 280, srow_y at 312, srow_z at 344 (8 float64 each)
+    // NIfTI-2 qform codes at offset 344 (int32) ... actually at 500 and 504
+    // srow_x[4]: float64[4] at 280; srow_y at 312; srow_z at 344
+    let orientAxes = '';
+    let dirMatrix: number[][] | null = null;
+    if (buf.length >= 376) {
+      const srowX2 = [readF64(280), readF64(288), readF64(296), readF64(304)];
+      const srowY2 = [readF64(312), readF64(320), readF64(328), readF64(336)];
+      const srowZ2 = [readF64(344), readF64(352), readF64(360), readF64(368)];
+      dirMatrix = [
+        [srowX2[0], srowX2[1], srowX2[2]],
+        [srowY2[0], srowY2[1], srowY2[2]],
+        [srowZ2[0], srowZ2[1], srowZ2[2]],
+      ];
+      orientAxes = computeOrientationAxes(dirMatrix);
+    }
+
     fields.push(
       { label: 'Format', value: 'NIfTI-2', group: 'Header' },
       { label: 'Endian', value: le ? 'Little-Endian' : 'Big-Endian', group: 'Header' },
@@ -252,8 +347,20 @@ export function parseNifti(fsPath: string): ImageMetadata {
       { label: 'Data Type', value: `${dtypeName} (${datatype})`, group: 'Data' },
     );
 
+    if (orientAxes) {
+      fields.push({ label: 'Orientation Axes', value: orientAxes, group: 'Orientation' });
+    }
+    if (dirMatrix) {
+      const rows = formatDirectionMatrix(dirMatrix);
+      fields.push(
+        { label: 'i-axis direction (RAS)', value: rows[0], group: 'Orientation' },
+        { label: 'j-axis direction (RAS)', value: rows[1], group: 'Orientation' },
+        { label: 'k-axis direction (RAS)', value: rows[2], group: 'Orientation' },
+      );
+    }
+
     const spatialDims = dims.slice(0, 3);
-    const brief = `${spatialDims.join('×')}  ${dtypeName}  NIfTI-2`;
+    const brief = `${spatialDims.join('×')}  ${dtypeName}${orientAxes ? '  ' + orientAxes : '  NIfTI-2'}`;
 
     return { format, fields, brief };
   }

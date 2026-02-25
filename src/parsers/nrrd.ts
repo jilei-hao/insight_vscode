@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { ImageMetadata, MetadataField } from './index';
+import { ImageMetadata, MetadataField, computeOrientationAxes } from './index';
 
 export function parseNrrd(fsPath: string): ImageMetadata {
   const fd = fs.openSync(fsPath, 'r');
@@ -108,11 +108,60 @@ export function parseNrrd(fsPath: string): ImageMetadata {
     }
   }
 
+  // --- Orientation from space directions ---
+  const spaceDirsRaw = kvPairs['space directions'] ?? '';
+  const spaceField = (kvPairs['space'] ?? '').toLowerCase();
+
+  // Determine if we need to convert LPS→RAS (flip first two world components)
+  const isLPS = spaceField.includes('left-posterior') || spaceField === 'lps';
+  const isLAS = spaceField.includes('left-anterior') || spaceField === 'las';
+
+  /**
+   * Parse a NRRD direction vector like "(1,0,0)" or "none".
+   * Returns null for "none" (non-spatial dimensions in 4D files).
+   */
+  function parseVec(s: string): number[] | null {
+    const trimmed = s.trim();
+    if (trimmed === 'none') { return null; }
+    const nums = trimmed.replace(/[()]/g, '').split(/[\s,]+/).map(Number);
+    return nums.length >= 3 ? nums : null;
+  }
+
+  // Space directions value looks like: "(1,0,0) (0,1,0) (0,0,1)"
+  // or "none (1,0,0) (0,1,0) (0,0,1)" for 4D with non-spatial first dim
+  const vecTokens = spaceDirsRaw.match(/\([^)]*\)|none/g) ?? [];
+  const spatialVecs = vecTokens.map(parseVec).filter((v): v is number[] => v !== null);
+
+  let orientAxes = '';
+  if (spatialVecs.length >= 3) {
+    // Build M[worldRow][voxelCol]: columns are the direction vectors
+    const M: number[][] = [
+      [spatialVecs[0][0], spatialVecs[1][0], spatialVecs[2][0]],
+      [spatialVecs[0][1], spatialVecs[1][1], spatialVecs[2][1]],
+      [spatialVecs[0][2], spatialVecs[1][2], spatialVecs[2][2]],
+    ];
+
+    // Convert to RAS if the space is LPS or LAS (flip rows 0 and 1)
+    if (isLPS || isLAS) {
+      for (let col = 0; col < 3; col++) { M[0][col] *= -1; M[1][col] *= -1; }
+    }
+
+    orientAxes = computeOrientationAxes(M);
+
+    const fmt = (v: number) => v.toFixed(4).padStart(9);
+    fields.push(
+      { label: 'Orientation Axes', value: orientAxes, group: 'Orientation' },
+      { label: 'i-axis direction', value: `[ ${fmt(spatialVecs[0][0])}  ${fmt(spatialVecs[0][1])}  ${fmt(spatialVecs[0][2])} ]`, group: 'Orientation' },
+      { label: 'j-axis direction', value: `[ ${fmt(spatialVecs[1][0])}  ${fmt(spatialVecs[1][1])}  ${fmt(spatialVecs[1][2])} ]`, group: 'Orientation' },
+      { label: 'k-axis direction', value: `[ ${fmt(spatialVecs[2][0])}  ${fmt(spatialVecs[2][1])}  ${fmt(spatialVecs[2][2])} ]`, group: 'Orientation' },
+    );
+  }
+
   const sizes = kvPairs['sizes'] ?? '';
   const type = kvPairs['type'] ?? '';
   const space = kvPairs['space'] ?? '';
   const sizeParts = sizes.split(/\s+/).filter(Boolean);
-  const brief = `${sizeParts.join('×')}  ${type}${space ? '  ' + space : ''}`;
+  const brief = `${sizeParts.join('×')}  ${type}${orientAxes ? '  ' + orientAxes : (space ? '  ' + space : '')}`;
 
   return { format: 'NRRD', fields, brief };
 }

@@ -27,6 +27,33 @@ function getExtension(fsPath: string): string {
   return path.extname(fsPath).toLowerCase();
 }
 
+/**
+ * Compute per-axis anatomical orientation labels from a 3×3 direction matrix
+ * expressed in RAS space.
+ *
+ * M[worldRow][voxelCol]:
+ *   worldRow 0 = R(+)/L(-),  1 = A(+)/P(-),  2 = S(+)/I(-)
+ *   voxelCol 0 = i-axis,     1 = j-axis,      2 = k-axis
+ *
+ * Returns e.g. "L→R  P→A  I→S"
+ */
+export function computeOrientationAxes(M: number[][]): string {
+  const pos = ['R', 'A', 'S'];
+  const neg = ['L', 'P', 'I'];
+  const axes: string[] = [];
+  for (let col = 0; col < 3; col++) {
+    let maxAbs = 0, maxRow = 0, maxSign = 1;
+    for (let row = 0; row < 3; row++) {
+      const v = M[row][col];
+      if (Math.abs(v) > maxAbs) { maxAbs = Math.abs(v); maxRow = row; maxSign = v > 0 ? 1 : -1; }
+    }
+    const posEnd = maxSign > 0 ? pos[maxRow] : neg[maxRow];
+    const negEnd = maxSign > 0 ? neg[maxRow] : pos[maxRow];
+    axes.push(`${negEnd}→${posEnd}`);
+  }
+  return axes.join('  ');
+}
+
 export function getMetadata(fsPath: string): ImageMetadata {
   const ext = getExtension(fsPath);
 
