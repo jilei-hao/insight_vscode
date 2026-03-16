@@ -2,7 +2,7 @@
   "name": "medical-image-insight",
   "displayName": "Medical Image Insight",
   "description": "Instant metadata viewer for medical imaging files: NIfTI, NRRD, VTK, VTP, VTI — no conversion needed.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "jilei-hao",
   "author": {
     "name": "Jilei Hao"
@@ -55,6 +55,10 @@
       {
         "command": "medicalImageInsight.showMetadata",
         "title": "Show Medical Image Metadata"
+      },
+      {
+        "command": "medicalImageInsight.stackImages",
+        "title": "Stack Images (N→N+1 Dim)"
       }
     ],
     "menus": {
@@ -62,6 +66,11 @@
         {
           "command": "medicalImageInsight.showMetadata",
           "when": "resourceExtname == .nii || resourceExtname == .nrrd || resourceExtname == .vtk || resourceExtname == .vtp || resourceExtname == .vti || resourceFilename =~ /\\.nii\\.gz$/ || resourceFilename =~ /\\.seq\\.nrrd$/",
+          "group": "navigation"
+        },
+        {
+          "command": "medicalImageInsight.stackImages",
+          "when": "resourceExtname == .nii || resourceExtname == .nrrd || resourceFilename =~ /\\.nii\\.gz$/ || resourceFilename =~ /\\.seq\\.nrrd$/",
           "group": "navigation"
         }
       ]

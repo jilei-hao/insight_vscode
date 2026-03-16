@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { MetadataEditorProvider } from './MetadataEditorProvider';
 import { MetadataDecorationProvider } from './MetadataDecorationProvider';
+import { stackMedicalImages } from './stackImages';
 
 export function activate(context: vscode.ExtensionContext): void {
   // 1. Register the custom editor provider (webview for medical image files)
@@ -40,6 +41,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
   context.subscriptions.push(commandDisposable);
+
+  // 4. Register the "Stack Images" command
+  const stackDisposable = vscode.commands.registerCommand(
+    'medicalImageInsight.stackImages',
+    async (uri: vscode.Uri, uris: vscode.Uri[]) => {
+      await stackMedicalImages(uri, uris);
+    }
+  );
+  context.subscriptions.push(stackDisposable);
 }
 
 export function deactivate(): void {
